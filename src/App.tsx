@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Todo } from './types/Todo';
-import { addTodo, deleteTodo, getTodos, USER_ID } from './api/todos';
+import {
+  addTodo,
+  deleteTodo,
+  getTodos,
+  updateTodo,
+  USER_ID,
+} from './api/todos';
 import { TodoList } from './components/TodoList';
 import { Footer } from './components/Footer';
 import { NewTodoField } from './components/NewTodoField';
@@ -44,6 +50,7 @@ export const App: React.FC = () => {
     [todos],
   );
   const activeCount = todos.length - completedCount;
+  const allCompleted = todos.length > 0 && completedCount === todos.length;
 
   const visibleTodos = useMemo(
     () =>
@@ -97,23 +104,138 @@ export const App: React.FC = () => {
       });
   };
 
-  const handleDeleteTodo = (todoId: number) => {
-    setErrorMessage('');
-    setProcessingIds(currentIds => [...currentIds, todoId]);
+  const addProcessingIds = (ids: number[]) => {
+    setProcessingIds(currentIds =>
+      Array.from(new Set([...currentIds, ...ids])),
+    );
+  };
 
-    deleteTodo(todoId)
-      .then(() => {
+  const removeProcessingIds = (ids: number[]) => {
+    setProcessingIds(currentIds => currentIds.filter(id => !ids.includes(id)));
+  };
+
+  const deleteTodoRequest = async (todoId: number, throwOnError = false) => {
+    setErrorMessage('');
+    addProcessingIds([todoId]);
+
+    try {
+      await deleteTodo(todoId);
+      setTodos(currentTodos => currentTodos.filter(todo => todo.id !== todoId));
+    } catch (error) {
+      setErrorMessage(ErrorType.Delete);
+
+      if (throwOnError) {
+        throw error;
+      }
+    } finally {
+      removeProcessingIds([todoId]);
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleDeleteTodo = (todoId: number) => {
+    void deleteTodoRequest(todoId);
+  };
+
+  const handleToggleTodo = (todo: Todo) => {
+    setErrorMessage('');
+    addProcessingIds([todo.id]);
+
+    updateTodo(todo.id, { completed: !todo.completed })
+      .then(updatedTodo => {
         setTodos(currentTodos =>
-          currentTodos.filter(todo => todo.id !== todoId),
+          currentTodos.map(currentTodo =>
+            currentTodo.id === updatedTodo.id ? updatedTodo : currentTodo,
+          ),
         );
       })
       .catch(() => {
-        setErrorMessage(ErrorType.Delete);
+        setErrorMessage(ErrorType.Update);
       })
       .finally(() => {
-        setProcessingIds(currentIds => currentIds.filter(id => id !== todoId));
-        inputRef.current?.focus();
+        removeProcessingIds([todo.id]);
       });
+  };
+
+  const handleToggleAll = () => {
+    const targetCompleted = !allCompleted;
+    const todosToUpdate = todos.filter(
+      todo => todo.completed !== targetCompleted,
+    );
+
+    if (todosToUpdate.length === 0) {
+      return;
+    }
+
+    const idsToUpdate = todosToUpdate.map(todo => todo.id);
+
+    setErrorMessage('');
+    addProcessingIds(idsToUpdate);
+
+    Promise.allSettled(
+      todosToUpdate.map(todo =>
+        updateTodo(todo.id, { completed: targetCompleted }),
+      ),
+    ).then(results => {
+      const updatedTodos = results
+        .filter(
+          (result): result is PromiseFulfilledResult<Todo> =>
+            result.status === 'fulfilled',
+        )
+        .map(result => result.value);
+
+      const hasFailures = results.some(result => result.status === 'rejected');
+
+      if (hasFailures) {
+        setErrorMessage(ErrorType.Update);
+      }
+
+      if (updatedTodos.length > 0) {
+        setTodos(currentTodos =>
+          currentTodos.map(currentTodo => {
+            const updatedTodo = updatedTodos.find(
+              todo => todo.id === currentTodo.id,
+            );
+
+            return updatedTodo ?? currentTodo;
+          }),
+        );
+      }
+
+      removeProcessingIds(idsToUpdate);
+    });
+  };
+
+  const handleRenameTodo = async (todo: Todo, updatedTitle: string) => {
+    const trimmedTitle = updatedTitle.trim();
+
+    if (trimmedTitle === todo.title) {
+      return;
+    }
+
+    if (!trimmedTitle) {
+      await deleteTodoRequest(todo.id, true);
+
+      return;
+    }
+
+    setErrorMessage('');
+    addProcessingIds([todo.id]);
+
+    try {
+      const updatedTodo = await updateTodo(todo.id, { title: trimmedTitle });
+
+      setTodos(currentTodos =>
+        currentTodos.map(currentTodo =>
+          currentTodo.id === updatedTodo.id ? updatedTodo : currentTodo,
+        ),
+      );
+    } catch (error) {
+      setErrorMessage(ErrorType.Update);
+      throw error;
+    } finally {
+      removeProcessingIds([todo.id]);
+    }
   };
 
   const handleClearCompleted = () => {
@@ -163,8 +285,11 @@ export const App: React.FC = () => {
         <NewTodoField
           value={newTitle}
           disabled={isCreating}
+          hasTodos={todos.length > 0}
+          allCompleted={allCompleted}
           inputRef={inputRef}
           onChange={setNewTitle}
+          onToggleAll={handleToggleAll}
           onSubmit={handleAddTodo}
         />
 
@@ -174,6 +299,8 @@ export const App: React.FC = () => {
             processingIds={processingIds}
             tempTodo={tempTodo}
             onDelete={handleDeleteTodo}
+            onToggle={handleToggleTodo}
+            onRename={handleRenameTodo}
           />
         )}
 

@@ -91,6 +91,23 @@
     }
   }
 
+  &.editing &__title {
+    display: none;
+  }
+
+  &.editing &__remove {
+    display: none;
+  }
+
+  &.editing &__title-field {
+    display: block;
+  }
+
+  &.editing form {
+    display: flex;
+    align-items: center;
+  }
+
   .overlay {
     position: absolute;
     top: 0;
