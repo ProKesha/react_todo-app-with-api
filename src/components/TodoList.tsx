@@ -50,14 +50,21 @@ const TodoRow: React.FC<TodoRowProps> = ({
         editing: isEditing,
       })}
     >
-      <div className="todo__status-label">
+      <div
+        className="todo__status-label"
+        onClick={() => {
+          if (!isProcessing) {
+            onToggle?.(todo);
+          }
+        }}
+      >
         <input
           type="checkbox"
           className="todo__status"
           data-cy="TodoStatus"
           checked={todo.completed}
+          readOnly
           disabled={isProcessing}
-          onChange={() => onToggle?.(todo)}
         />
       </div>
 
